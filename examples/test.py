@@ -2,7 +2,7 @@ import numpy as np
 import time
 from field_ops import Engine
 
-n = 100
+n = 50
 v = np.linspace(0, 1, n)
 x, y, z = np.meshgrid(v, v, v, indexing='ij')
 
@@ -103,7 +103,8 @@ print('... Sim time   (ms):     {:0.1f}'.format(sim_time*1000))
 print('\n--- Testing FFT ---')
 # run once to be sure the FFT is planned
 _ = np.fft.ifftn(NR).real
-st = time.time(); NR = np.fft.fftn(NR, axes=(-3,-2,-1)); numpy_time = time.time()-st
+D_hat = sim.get('D_hat').copy()
+st = time.time(); NR = np.fft.ifftn(D_hat, axes=(-3,-2,-1)); numpy_time = time.time()-st
 st = time.time(); sim.ifft('D_hat', 'D'); sim_time = time.time()-st
 print('... All close? ', np.allclose(NR, sim.get('D')))
 print('... numpy time (ms):     {:0.1f}'.format(numpy_time*1000))

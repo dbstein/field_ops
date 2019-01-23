@@ -191,11 +191,17 @@ def _mat_mat(M1, M2, M3):
     for i in numba.prange(n):
         __mat_mat(M1[:,:,i], M2[:,:,i], M3[:,:,i])
 
+def _realit(x, realit):
+    return x.real if realit else x
 def _fft(u, uh):
     n = u.shape[0]
     for i in range(n):
         uh[i] = np.fft.fftn(u[i])
 def _ifft(uh, u):
+    realit = u.dtype == float
     n = u.shape[0]
     for i in range(n):
-        u[i] = np.fft.ifftn(uh[i]).real
+        u[i] = _realit(np.fft.ifftn(uh[i]), realit)
+
+
+
