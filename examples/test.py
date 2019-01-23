@@ -59,7 +59,12 @@ print('... Sim time  (ms):   {:0.1f}'.format(sim_time*1000))
 
 # test eigendecomp on on-the-fly allocated variable
 print('--- Testing eigendecomposition on new variable of (2,2) size ---')
-sim.allocate_many(['M2', 'v2', 'V2'], [[2,2],[2],[2,2]], [float,]*3)
+variables = [
+	['M2', [2,2], float],
+	['v2', [2],   float],
+	['V2', [2,2], float],
+]
+sim.allocate_many(variables)
 M2 = sim.get('M2')
 M2[:] = R[:2,:2]
 S = np.transpose(M2, [2,3,4,0,1])

@@ -40,9 +40,9 @@ class Engine(object):
         """
         self._allocate(name, field_shape, dtype)
         self.reset_pool()
-    def allocate_many(self, names, field_shapes, dtypes):
-        for name, field_shape, dtype in zip(names, field_shapes, dtypes):
-            self._allocate(name, field_shape, dtype)
+    def allocate_many(self, var_list):
+        for sublist in var_list:
+            self._allocate(*sublist)
         self.reset_pool()
     def add_constant(self, name, value):
         """
