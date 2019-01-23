@@ -61,6 +61,49 @@ class Engine(object):
             ['e',           np.e          ],
             ['euler_gamma', np.euler_gamma],
         ]
+    def copy_from_to(self, vf, vt):
+        self.get(vf)[:] = self.get(vt)
+    def point_at(self, name, field, field_inds):
+        # point a name at some subset of a field
+        F = self.get(field)
+        l = len(field_inds)
+        for i in range(l):
+            F = F[field_inds[i]]
+        self.add(name, F)
+    def point_at_many(self, point_list):
+        for sublist in point_list:
+            self.point_at(*sublist)
+    def point_at_all_subfields(self, field):
+        F = self.get(field)
+        field_sh, base_sh = self._extract_shapes(F)
+        field_lsh = len(field_sh)
+        sh_list = [np.arange(x) for x in field_sh]
+        n = np.prod(field_sh)
+        # generate all codes
+        codes = []
+        for i in range(field_lsh):
+            code = np.empty(n, dtype=object)
+            excess = np.prod(field_sh[i+1:])
+            code = np.repeat(np.arange(field_sh[i]), excess)
+            precess = np.prod(field_sh[:i])
+            code = np.tile(code, precess)
+            codes.append(code)
+        code_reorder = []
+        for i in range(n):
+            code = []
+            for j in range(field_lsh):
+                code.append(codes[j][i])
+            code_reorder.append(code)
+        codes = code_reorder
+        # point everything where it should go
+        for i in range(n):
+            name = field
+            field_inds = []
+            for j in range(field_lsh):
+                code = codes[i][j]
+                name += '_' + str(code)
+                field_inds.append(code)
+            self.point_at(name, field, field_inds)
 
     ############################################################################
     # methods for extracting variables
@@ -108,7 +151,11 @@ class Engine(object):
     # einsum
     def einsum(self, instr, evars, out):
         evars = [self.get(evar) for evar in evars]
-        np.einsum(instr, *evars, out=self.get(out))
+        outv = self.get(out)
+        # deal with reductions of scalar...
+        if outv.shape[0] == 1:
+            outv = outv.reshape(outv.shape[1:])
+        np.einsum(instr, *evars, out=outv)
     # this parallel version is slower for now...
     def bad_einsum(self, instr, evars, out):
         n = self.base_shape[-1]
@@ -147,6 +194,12 @@ class Engine(object):
         M3M = self._reshape_field(self.get(O))
         _mat_mat(M1M, M2M, M3M)
 
+    def mat_mat_tA(self, M1, M2, O):
+        M1M = self._reshape_field(self.get(M1))
+        M2M = self._reshape_field(self.get(M2))
+        M3M = self._reshape_field(self.get(O))
+        _mat_mat_tA(M1M, M2M, M3M)
+
     ############################################################################
     # FFT
     def fft(self, X, XH):
@@ -174,22 +227,31 @@ def __mat_mat(A, B, C):
     sh2 = A.shape[1]
     sh3 = B.shape[1]
     for i in range(sh1):
-        for j in range(sh3):
-            C[i,j] = 0.0
-            for k in range(sh2):
-                C[i,j] += A[i,k]*B[k,j]
-@numba.njit(parallel=True)
-def _mat_mat3(M1, M2, M3):
-    n = M1.shape[-1]
-    for i in numba.prange(n):
-        for j in range(n):
-            for k in range(n):
-                __mat_mat(M1[:,:,i,j,k], M2[:,:,i,j,k], M3[:,:,i,j,k])
+        for k in range(sh3):
+            C[i,k] = 0.0
+            for j in range(sh2):
+                C[i,k] += A[i,j]*B[j,k]
 @numba.njit(parallel=True)
 def _mat_mat(M1, M2, M3):
     n = M1.shape[-1]
     for i in numba.prange(n):
         __mat_mat(M1[:,:,i], M2[:,:,i], M3[:,:,i])
+
+@numba.njit()
+def __mat_mat_tA(A, B, C):
+    sh1 = A.shape[1]
+    sh2 = A.shape[0]
+    sh3 = B.shape[1]
+    for i in range(sh1):
+        for k in range(sh3):
+            C[i,k] = 0.0
+            for j in range(sh2):
+                C[i,k] += A[j,i]*B[j,k]
+@numba.njit(parallel=True)
+def _mat_mat_tA(M1, M2, M3):
+    n = M1.shape[-1]
+    for i in numba.prange(n):
+        __mat_mat_tA(M1[:,:,i], M2[:,:,i], M3[:,:,i])
 
 def _realit(x, realit):
     return x.real if realit else x

@@ -90,6 +90,18 @@ print('... All close? ', np.allclose(NR, sim.get('M')))
 print('... numpy time (ms):     {:0.1f}'.format(numpy_time*1000))
 print('... Sim time   (ms):     {:0.1f}'.format(sim_time*1000))
 
+# test matrix matrix multiply, with transpose on first mat
+print('\n--- Testing matrix matrix multiply, transpose on first mat ---')
+D = sim.get('D')
+R = sim.get('R')
+# run once to compile
+sim.mat_mat_tA('D', 'R', 'M');
+st = time.time(); NR = np.einsum('ji...,jk...->ik...', D, R); numpy_time = time.time()-st
+st = time.time(); sim.mat_mat_tA('D', 'R', 'M'); sim_time = time.time()-st
+print('... All close? ', np.allclose(NR, sim.get('M')))
+print('... numpy time (ms):     {:0.1f}'.format(numpy_time*1000))
+print('... Sim time   (ms):     {:0.1f}'.format(sim_time*1000))
+
 # test FFTs
 print('\n--- Testing FFT ---')
 # run once to be sure the FFT is planned
@@ -110,6 +122,29 @@ print('... All close? ', np.allclose(NR, sim.get('D')))
 print('... numpy time (ms):     {:0.1f}'.format(numpy_time*1000))
 print('... Sim time   (ms):     {:0.1f}'.format(sim_time*1000))
 
+print('\n--- Test einsum against numexpr for semi complex expression ---')
+sim.allocate('f',      [3], 'both')
+sim.allocate('div_f1', [1], 'both')
+sim.allocate('div_f2', [1], 'both')
+sim.allocate('ik',     [3], complex)
+f = sim.get('f')
+f[:] = np.random.rand(*f.shape)
+sim.point_at_all_subfields('ik')
+sim.point_at_all_subfields('f_hat')
+ikx = sim.get('ik_0')
+iky = sim.get('ik_1')
+ikz = sim.get('ik_2')
+kv = np.fft.fftfreq(n)
+kx, ky, kz = np.meshgrid(kv, kv, kv, indexing='ij')
+ikx[:] = kx*1j
+iky[:] = ky*1j
+ikz[:] = kz*1j
+sim.fft('f', 'f_hat')
+st = time.time(); sim.einsum('i...,i...->...',['ik','f_hat'],'div_f1_hat'); einsum_time = time.time()-st
+st = time.time(); sim.evaluate('ik_0*f_hat_0 + ik_1*f_hat_1 + ik_2*f_hat_2', 'div_f2_hat'); numexpr_time = time.time()-st
+print('...All close?', np.allclose(sim.get('div_f1_hat'), sim.get('div_f2_hat')))
+print('... einsum  time (ms):     {:0.1f}'.format(numexpr_time*1000))
+print('... numexpr time (ms):     {:0.1f}'.format(einsum_time*1000))
 
 # terminate the pool
 sim.terminate_pool()
