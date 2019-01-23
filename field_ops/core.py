@@ -44,15 +44,23 @@ class Engine(object):
         for sublist in var_list:
             self._allocate(*sublist)
         self.reset_pool()
-    def add_constant(self, name, value):
+    def add(self, name, value):
         """
-        Add a constant to the variable dictionary for use in ne.evaluate
+        Add value to the variable dictionary
+        Note that this differs from the behavior of allocate!
+        What is added is NOT a memmap, and must be used in a read-only manner
+        in multiprocessing code!
         """
         self.variables[name] = value
+    def add_many(self, add_list):
+        for sublist in add_list:
+            self.add(*sublist)
     def _add_base_constants(self):
-        self.add_constant('pi', np.pi)
-        self.add_constant('e', np.e)
-        self.add_constant('euler_gamma', np.euler_gamma)
+        constants = [
+            ['pi',          np.pi         ],
+            ['e',           np.e          ],
+            ['euler_gamma', np.euler_gamma],
+        ]
 
     ############################################################################
     # methods for extracting variables
@@ -107,6 +115,23 @@ class Engine(object):
         self.pool.starmap(_einsum, zip(range(n), [instr,]*n, [evars,]*n, [out,]*n))
 
     ############################################################################
+    # reshaping functions
+    def _extract_shapes(self, X):
+        sh = list(X.shape)
+        lsh = len(sh)
+        field_lsh = lsh - self.base_length
+        field_sh = sh[:field_lsh]
+        return field_sh, self.base_shape
+    def _reshape_tensor(self, X):
+        field_sh, base_sh = self._extract_shapes(X)
+        newsh = [np.prod(field_sh)] + base_sh
+        return np.reshape(X, newsh)
+    def _reshape_field(self, X):
+        field_sh, base_sh = self._extract_shapes(X)
+        newsh = field_sh + [np.prod(base_sh)]
+        return np.reshape(X, newsh)
+
+    ############################################################################
     # eigh solver
     def eigh(self, M, Mv, MV):
         n = self.base_shape[-1]
@@ -116,15 +141,22 @@ class Engine(object):
 
     ############################################################################
     # matrix matrix multiply
-    def _mat_mat_reshape(self, M):
-        sh = list(M.shape)
-        newsh = sh[:2] + [np.prod(sh[2:]),]
-        return np.reshape(M, newsh)
     def mat_mat(self, M1, M2, O):
-        M1M = self._mat_mat_reshape(self.get(M1))
-        M2M = self._mat_mat_reshape(self.get(M2))
-        M3M = self._mat_mat_reshape(self.get(O))
+        M1M = self._reshape_field(self.get(M1))
+        M2M = self._reshape_field(self.get(M2))
+        M3M = self._reshape_field(self.get(O))
         _mat_mat(M1M, M2M, M3M)
+
+    ############################################################################
+    # FFT
+    def fft(self, X, XH):
+        X =  self._reshape_tensor(self.get(X))
+        XH = self._reshape_tensor(self.get(XH))
+        _fft(X, XH)
+    def ifft(self, XH, X):
+        X =  self._reshape_tensor(self.get(X))
+        XH = self._reshape_tensor(self.get(XH))
+        _ifft(XH, X)
 
 # internal functions for parallel execution
 def _einsum(n, instr, evars, out):
@@ -159,5 +191,11 @@ def _mat_mat(M1, M2, M3):
     for i in numba.prange(n):
         __mat_mat(M1[:,:,i], M2[:,:,i], M3[:,:,i])
 
-
-
+def _fft(u, uh):
+    n = u.shape[0]
+    for i in range(n):
+        uh[i] = np.fft.fftn(u[i])
+def _ifft(uh, u):
+    n = u.shape[0]
+    for i in range(n):
+        u[i] = np.fft.ifftn(uh[i]).real
