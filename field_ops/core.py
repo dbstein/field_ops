@@ -4,7 +4,6 @@ import numexpr as ne
 import numba
 import multiprocessing as mp
 from .utilities import Bunch, RawArray, mmap_zeros
-from .modules import parallel_einsum
 import mkl
 
 max_processes = mkl.get_max_threads()
