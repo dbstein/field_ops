@@ -1,6 +1,7 @@
 import numpy as np
 import scipy as sp
 import numexpr as ne
+import opt_einsum as oe
 import numba
 import multiprocessing as mp
 from .utilities import Bunch, RawArray, mmap_zeros
@@ -25,9 +26,11 @@ class Engine(object):
         shape = list(field_shape) + self.base_shape
         if dtype == float or dtype == complex:
             self.__allocate(name, shape, dtype)
+            self.point_at_all_subfields(name)
         elif dtype == 'both':
             self.__allocate(name, shape, float)
             self.__allocate(name + '_hat', shape, complex)
+            self.point_at_all_subfields(name + '_hat')
         else:
             raise Exception('dtype not supported')
     def allocate(self, name, field_shape, dtype=float):
@@ -44,7 +47,7 @@ class Engine(object):
         for sublist in var_list:
             self._allocate(*sublist)
         self.reset_pool()
-    def add(self, name, value):
+    def add(self, name, value, point_subfields=False):
         """
         Add value to the variable dictionary
         Note that this differs from the behavior of allocate!
@@ -52,6 +55,8 @@ class Engine(object):
         in multiprocessing code!
         """
         self.variables[name] = value
+        if point_subfields:
+            self.point_at_all_subfields(name)
     def add_many(self, add_list):
         for sublist in add_list:
             self.add(*sublist)
@@ -77,33 +82,34 @@ class Engine(object):
         F = self.get(field)
         field_sh, base_sh = self._extract_shapes(F)
         field_lsh = len(field_sh)
-        sh_list = [np.arange(x) for x in field_sh]
-        n = np.prod(field_sh)
-        # generate all codes
-        codes = []
-        for i in range(field_lsh):
-            code = np.empty(n, dtype=object)
-            excess = np.prod(field_sh[i+1:])
-            code = np.repeat(np.arange(field_sh[i]), excess)
-            precess = np.prod(field_sh[:i])
-            code = np.tile(code, precess)
-            codes.append(code)
-        code_reorder = []
-        for i in range(n):
-            code = []
-            for j in range(field_lsh):
-                code.append(codes[j][i])
-            code_reorder.append(code)
-        codes = code_reorder
-        # point everything where it should go
-        for i in range(n):
-            name = field
-            field_inds = []
-            for j in range(field_lsh):
-                code = codes[i][j]
-                name += '_' + str(code)
-                field_inds.append(code)
-            self.point_at(name, field, field_inds)
+        if field_lsh > 0:
+            sh_list = [np.arange(x) for x in field_sh]
+            n = np.prod(field_sh)
+            # generate all codes
+            codes = []
+            for i in range(field_lsh):
+                code = np.empty(n, dtype=object)
+                excess = np.prod(field_sh[i+1:])
+                code = np.repeat(np.arange(field_sh[i]), excess)
+                precess = np.prod(field_sh[:i])
+                code = np.tile(code, precess)
+                codes.append(code)
+            code_reorder = []
+            for i in range(n):
+                code = []
+                for j in range(field_lsh):
+                    code.append(codes[j][i])
+                code_reorder.append(code)
+            codes = code_reorder
+            # point everything where it should go
+            for i in range(n):
+                name = field
+                field_inds = []
+                for j in range(field_lsh):
+                    code = codes[i][j]
+                    name += str(code)
+                    field_inds.append(code)
+                self.point_at(name, field, field_inds)
 
     ############################################################################
     # methods for extracting variables
@@ -135,12 +141,18 @@ class Engine(object):
 
     ############################################################################
     # method for easing interface to numexpr
+    def _fix_instruction(self, instr):
+        instr = instr.replace('[','')
+        instr = instr.replace(',','')
+        instr = instr.replace(']','')
+        return instr
     def evaluate(self, instr, outname):
         """
         Evaluates 'instr' on self.variables using ne.evaluate,
         and stores the result in 'outname', replacing whatever was there
         if outname doesn't exist, this function will create it
         """
+        instr = self._fix_instruction(instr)
         if outname in self.variables.keys():
             ne.evaluate(instr, local_dict=self.variables, out=self.get(outname))
         else:
@@ -149,13 +161,12 @@ class Engine(object):
 
     ############################################################################
     # einsum
-    def einsum(self, instr, evars, out):
+    def einsum(self, instr, evars, out, use_opt=True):
         evars = [self.get(evar) for evar in evars]
-        outv = self.get(out)
-        # deal with reductions of scalar...
-        if outv.shape[0] == 1:
-            outv = outv.reshape(outv.shape[1:])
-        np.einsum(instr, *evars, out=outv)
+        if use_opt:
+            oe.contract(instr, *evars, out=self.get(out))
+        else:
+            np.einsum(instr, *evars, out=self.get(out))
     # this parallel version is slower for now...
     def bad_einsum(self, instr, evars, out):
         n = self.base_shape[-1]
@@ -171,11 +182,11 @@ class Engine(object):
         return field_sh, self.base_shape
     def _reshape_tensor(self, X):
         field_sh, base_sh = self._extract_shapes(X)
-        newsh = [np.prod(field_sh)] + base_sh
+        newsh = [int(np.prod(field_sh))] + base_sh
         return np.reshape(X, newsh)
     def _reshape_field(self, X):
         field_sh, base_sh = self._extract_shapes(X)
-        newsh = field_sh + [np.prod(base_sh)]
+        newsh = field_sh + [int(np.prod(base_sh))]
         return np.reshape(X, newsh)
 
     ############################################################################
