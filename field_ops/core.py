@@ -28,6 +28,7 @@ class Engine(object):
             self.point_at_all_subfields(name)
         elif dtype == 'both':
             self.__allocate(name, shape, float)
+            self.point_at_all_subfields(name)
             self.__allocate(name + '_hat', shape, complex)
             self.point_at_all_subfields(name + '_hat')
         else:
@@ -199,7 +200,7 @@ class Engine(object):
     ############################################################################
     # eigh solver
     def eigh(self, M, Mv, MV):
-        n = self.base_shape[-1]
+        n = self.base_shape[0]
         t1 = [2 + i for i in range(len(self.base_shape))] + [0,1]
         t2 = [1 + i for i in range(len(self.base_shape))] + [0,]
         self.pool.starmap(_eigh, zip(range(n), [M,]*n, [Mv,]*n, [MV,]*n, [t1,]*n, [t2,]*n))
