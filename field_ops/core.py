@@ -67,7 +67,7 @@ class Engine(object):
             ['euler_gamma', np.euler_gamma],
         ]
     def copy_from_to(self, vf, vt):
-        self.get(vf)[:] = self.get(vt)
+        self.get(vt)[:] = self.get(vf)
     def point_at(self, name, field, field_inds):
         # point a name at some subset of a field
         F = self.get(field)
