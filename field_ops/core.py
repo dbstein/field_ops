@@ -164,7 +164,7 @@ class Engine(object):
     def einsum(self, instr, evars, out, use_opt=True):
         evars = [self.get(evar) for evar in evars]
         if use_opt:
-            oe.contract(instr, *evars, out=self.get(out))
+            oe.contract(instr, *evars, out=self.get(out), use_blas=False)
         else:
             np.einsum(instr, *evars, out=self.get(out))
     # this parallel version is slower for now...
@@ -210,6 +210,14 @@ class Engine(object):
         M2M = self._reshape_field(self.get(M2))
         M3M = self._reshape_field(self.get(O))
         _mat_mat_tA(M1M, M2M, M3M)
+
+    ############################################################################
+    # simple dot
+    def dot(self, M1, M2, O):
+        M1M = self._reshape_field(self.get(M1))
+        M2M = self._reshape_field(self.get(M2))
+        M3M = self._reshape_field(self.get(O))
+        _dot(M1M, M2M, M3M)
 
     ############################################################################
     # FFT
@@ -263,6 +271,16 @@ def _mat_mat_tA(M1, M2, M3):
     n = M1.shape[-1]
     for i in numba.prange(n):
         __mat_mat_tA(M1[:,:,i], M2[:,:,i], M3[:,:,i])
+
+@numba.njit(parallel=True)
+def _dot(M1, M2, M3):
+    n = M1.shape[-1]
+    m = M1.shape[0]
+    for i in range(n):
+        M3[i] = 0
+    for i in numba.prange(n):
+        for j in range(m):
+            M3[i] += M1[j,i]*M2[j,i]
 
 def _realit(x, realit):
     return x.real if realit else x

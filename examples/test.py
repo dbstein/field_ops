@@ -2,7 +2,7 @@ import numpy as np
 import time
 from field_ops import Engine
 
-n = 100
+n = 200
 v = np.linspace(0, 1, n)
 x, y, z = np.meshgrid(v, v, v, indexing='ij')
 
@@ -139,13 +139,14 @@ ikx[:] = kx*1j
 iky[:] = ky*1j
 ikz[:] = kz*1j
 sim.fft('f', 'f_hat')
+sim.dot('ik','f_hat','div_f2_hat')
 st = time.time(); sim.einsum('i...,i...->...',['ik','f_hat'],'div_f1_hat',False); einsum_time = time.time()-st
-st = time.time(); sim.einsum('i...,i...->...',['ik','f_hat'],'div_f2_hat',True); optein_time = time.time()-st
+st = time.time(); sim.dot('ik','f_hat','div_f2_hat'); numba_time = time.time()-st
 st = time.time(); sim.evaluate('ik[0]*f_hat[0] + ik[1]*f_hat[1] + ik[2]*f_hat[2]', 'div_f3_hat'); numexpr_time = time.time()-st
 print('... All close?', np.allclose(sim.get('div_f1_hat'), sim.get('div_f2_hat')))
 print('... All close?', np.allclose(sim.get('div_f1_hat'), sim.get('div_f3_hat')))
 print('... einsum  time (ms):   {:0.1f}'.format(einsum_time*1000))
-print('... optein  time (ms):   {:0.1f}'.format(optein_time*1000))
+print('... numba  time  (ms):   {:0.1f}'.format(numba_time*1000))
 print('... numexpr time (ms):   {:0.1f}'.format(numexpr_time*1000))
 
 # terminate the pool
