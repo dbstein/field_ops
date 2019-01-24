@@ -102,7 +102,7 @@ class Engine(object):
             codes = code_reorder
             # point everything where it should go
             for i in range(n):
-                name = field
+                name = field + '_'
                 field_inds = []
                 for j in range(field_lsh):
                     code = codes[i][j]
@@ -112,11 +112,16 @@ class Engine(object):
 
     ############################################################################
     # methods for extracting variables
+    def _fix_names(self, name):
+        name = name.replace('[','_')
+        name = name.replace(',','')
+        name = name.replace(']','')
+        return name
     def get(self, name):
         """
         Return the underlying numpy array for variable of name
         """
-        return self.variables[name]
+        return self.variables[self._fix_names(name)]
     def list(self):
         return self.variables.keys()
 
@@ -140,18 +145,13 @@ class Engine(object):
 
     ############################################################################
     # method for easing interface to numexpr
-    def _fix_instruction(self, instr):
-        instr = instr.replace('[','')
-        instr = instr.replace(',','')
-        instr = instr.replace(']','')
-        return instr
     def evaluate(self, instr, outname):
         """
         Evaluates 'instr' on self.variables using ne.evaluate,
         and stores the result in 'outname', replacing whatever was there
         if outname doesn't exist, this function will create it
         """
-        instr = self._fix_instruction(instr)
+        instr = self._fix_names(instr)
         if outname in self.variables.keys():
             ne.evaluate(instr, local_dict=self.variables, out=self.get(outname))
         else:
