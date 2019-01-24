@@ -2,7 +2,7 @@ import numpy as np
 import time
 from field_ops import Engine
 
-n = 200
+n = 50
 v = np.linspace(0, 1, n)
 x, y, z = np.meshgrid(v, v, v, indexing='ij')
 
@@ -33,11 +33,12 @@ eye[1,1] = 1.0
 eye[2,2] = 1.0
 
 # execute an einsum prod on D
-print('\n--- Testing einsum ---')
+print('\n--- Testing einsum MAT MAT ---')
 instr = 'ij...,jk...->ik...'
+sim.einsum(instr, ['D','D'], 'R')
 st = time.time(); truth = np.einsum(instr,D,D); numpy_time = time.time()-st
 st = time.time(); sim.einsum(instr, ['D','D'], 'R'); sim_time = time.time()-st
-print('All close?        ', np.allclose(truth, sim.get('R')))
+print('All close?              ', np.allclose(truth, sim.get('R')))
 print('... Einsum time (ms):    {:0.1f}'.format(numpy_time*1000))
 print('... Sim time    (ms):    {:0.1f}'.format(sim_time*1000))
 
@@ -78,18 +79,6 @@ print('... All close, vectors? ', np.allclose(tV, sim.get('V2')))
 print('... Eigh time (ms):      {:0.1f}'.format(numpy_time*1000))
 print('... Sim time  (ms):      {:0.1f}'.format(sim_time*1000))
 
-# test matrix matrix multiply
-print('\n--- Testing matrix matrix multiply ---')
-D = sim.get('D')
-R = sim.get('R')
-# run once to compile
-sim.mat_mat('D', 'R', 'M');
-st = time.time(); NR = np.einsum('ij...,jk...->ik...', D, R); numpy_time = time.time()-st
-st = time.time(); sim.mat_mat('D', 'R', 'M'); sim_time = time.time()-st
-print('... All close? ', np.allclose(NR, sim.get('M')))
-print('... numpy time (ms):     {:0.1f}'.format(numpy_time*1000))
-print('... Sim time   (ms):     {:0.1f}'.format(sim_time*1000))
-
 # test matrix matrix multiply, with transpose on first mat
 print('\n--- Testing matrix matrix multiply, transpose on first mat ---')
 D = sim.get('D')
@@ -98,102 +87,61 @@ R = sim.get('R')
 sim.mat_mat_tA('D', 'R', 'M');
 st = time.time(); NR = np.einsum('ji...,jk...->ik...', D, R); numpy_time = time.time()-st
 st = time.time(); sim.mat_mat_tA('D', 'R', 'M'); sim_time = time.time()-st
-print('... All close? ', np.allclose(NR, sim.get('M')))
+print('... All close?          ', np.allclose(NR, sim.get('M')))
 print('... numpy time (ms):     {:0.1f}'.format(numpy_time*1000))
 print('... Sim time   (ms):     {:0.1f}'.format(sim_time*1000))
 
 # test FFTs
-print('\n--- Testing FFT ---')
+print('\n--- Testing FFT (as compared to FFTPACK) ---')
 # run once to be sure the FFT is planned
 _ = np.fft.fftn(D)
-st = time.time(); NR = np.fft.fftn(D, axes=(-3,-2,-1)); numpy_time = time.time()-st
+st = time.time(); NR = np.fft.fftpack.fftn(D, axes=(-3,-2,-1)); numpy_time = time.time()-st
 st = time.time(); sim.fft('D', 'D_hat'); sim_time = time.time()-st
-print('... All close? ', np.allclose(NR, sim.get('D_hat')))
+print('... All close?          ', np.allclose(NR, sim.get('D_hat')))
 print('... numpy time (ms):     {:0.1f}'.format(numpy_time*1000))
 print('... Sim time   (ms):     {:0.1f}'.format(sim_time*1000))
 
-print('\n--- Testing FFT ---')
+print('\n--- Testing IFFT (as compared to FFTPACK) ---')
 # run once to be sure the FFT is planned
 _ = np.fft.ifftn(NR).real
 D_hat = sim.get('D_hat').copy()
-st = time.time(); NR = np.fft.ifftn(D_hat, axes=(-3,-2,-1)); numpy_time = time.time()-st
+st = time.time(); NR = np.fft.fftpack.ifftn(D_hat, axes=(-3,-2,-1)); numpy_time = time.time()-st
 st = time.time(); sim.ifft('D_hat', 'D'); sim_time = time.time()-st
-print('... All close? ', np.allclose(NR, sim.get('D')))
+print('... All close?          ', np.allclose(NR, sim.get('D')))
 print('... numpy time (ms):     {:0.1f}'.format(numpy_time*1000))
 print('... Sim time   (ms):     {:0.1f}'.format(sim_time*1000))
 
-print('\n--- Test einsum against numexpr for semi complex expression ---')
-sim.allocate('f',      [3], 'both')
-sim.allocate('div_f1', [], 'both')
-sim.allocate('div_f2', [], 'both')
-sim.allocate('div_f3', [], 'both')
-sim.allocate('ik',     [3], complex)
-f = sim.get('f')
-f[:] = np.random.rand(*f.shape)
-ikx = sim.get('ik0')
-iky = sim.get('ik1')
-ikz = sim.get('ik2')
-kv = np.fft.fftfreq(n)
-kx, ky, kz = np.meshgrid(kv, kv, kv, indexing='ij')
-ikx[:] = kx*1j
-iky[:] = ky*1j
-ikz[:] = kz*1j
-sim.fft('f', 'f_hat')
-sim.dot0('ik','f_hat','div_f2_hat')
-st = time.time(); sim.einsum('i...,i...->...',['ik','f_hat'],'div_f1_hat',False); einsum_time = time.time()-st
-st = time.time(); sim.dot0('ik','f_hat','div_f2_hat'); numba_time = time.time()-st
-st = time.time(); sim.evaluate('ik[0]*f_hat[0] + ik[1]*f_hat[1] + ik[2]*f_hat[2]', 'div_f3_hat'); numexpr_time = time.time()-st
-print('... All close?', np.allclose(sim.get('div_f1_hat'), sim.get('div_f2_hat')))
-print('... All close?', np.allclose(sim.get('div_f1_hat'), sim.get('div_f3_hat')))
-print('... einsum  time (ms):   {:0.1f}'.format(einsum_time*1000))
-print('... numba  time  (ms):   {:0.1f}'.format(numba_time*1000))
-print('... numexpr time (ms):   {:0.1f}'.format(numexpr_time*1000))
-
-print('\n--- Test dot1 ---')
-sim.allocate('f',      [3,3], 'both')
-sim.allocate('div_f1', [3],   'both')
-sim.allocate('div_f2', [3],   'both')
-sim.allocate('ik',     [3],   complex)
-f = sim.get('f')
-f[:] = np.random.rand(*f.shape)
-ikx = sim.get('ik0')
-iky = sim.get('ik1')
-ikz = sim.get('ik2')
-kv = np.fft.fftfreq(n)
-kx, ky, kz = np.meshgrid(kv, kv, kv, indexing='ij')
-ikx[:] = kx*1j
-iky[:] = ky*1j
-ikz[:] = kz*1j
-sim.fft('f', 'f_hat')
-sim.dot1('ik','f_hat','div_f2_hat')
-st = time.time(); sim.einsum('i...,ij...->j...',['ik','f_hat'],'div_f1_hat',False); einsum_time = time.time()-st
-st = time.time(); sim.dot1('ik','f_hat','div_f2_hat'); numba_time = time.time()-st
-print('... All close?', np.allclose(sim.get('div_f1_hat'), sim.get('div_f2_hat')))
-print('... einsum  time (ms):   {:0.1f}'.format(einsum_time*1000))
-print('... numba  time  (ms):   {:0.1f}'.format(numba_time*1000))
-
-print('\n--- Test dot2 ---')
-sim.allocate('f',      [3,3,3], 'both')
-sim.allocate('div_f1', [3,3],   'both')
-sim.allocate('div_f2', [3,3],   'both')
-sim.allocate('ik',     [3],   complex)
-f = sim.get('f')
-f[:] = np.random.rand(*f.shape)
-ikx = sim.get('ik0')
-iky = sim.get('ik1')
-ikz = sim.get('ik2')
-kv = np.fft.fftfreq(n)
-kx, ky, kz = np.meshgrid(kv, kv, kv, indexing='ij')
-ikx[:] = kx*1j
-iky[:] = ky*1j
-ikz[:] = kz*1j
-sim.fft('f', 'f_hat')
-sim.dot2('ik','f_hat','div_f2_hat')
-st = time.time(); sim.einsum('i...,ijk...->jk...',['ik','f_hat'],'div_f1_hat',False); einsum_time = time.time()-st
-st = time.time(); sim.dot2('ik','f_hat','div_f2_hat'); numba_time = time.time()-st
-print('... All close?', np.allclose(sim.get('div_f1_hat'), sim.get('div_f2_hat')))
-print('... einsum  time (ms):   {:0.1f}'.format(einsum_time*1000))
-print('... numba  time  (ms):   {:0.1f}'.format(numba_time*1000))
+print('\n--- Test common einsums ---')
+def test_common(instr):
+	# parse instr
+	print('...Testing einsum:', instr)
+	l1, l2 = instr.split(',')
+	l2, l3 = l2.split('->')
+	l1 = len(l1.replace('...',''))
+	l2 = len(l2.replace('...',''))
+	l3 = len(l3.replace('...',''))
+	# get shapes
+	sh1 = [3,]*l1 + [n,n,n]
+	sh2 = [3,]*l2 + [n,n,n]
+	sh3 = [3,]*l3 + [n,n,n]
+	# allocate memory
+	sim.allocate('M1', sh1[:l1], float)
+	sim.allocate('M2', sh2[:l2], float)
+	sim.allocate('M3', sh3[:l3], float)
+	M1N = np.random.rand(*sh1)
+	M2N = np.random.rand(*sh2)
+	sim.get('M1')[:] = M1N
+	sim.get('M2')[:] = M2N
+	# test numpy
+	st = time.time(); M3N = np.einsum(instr, M1N, M2N); numpy_time=time.time()-st
+	# test sim
+	sim.einsum(instr, ['M1', 'M2'], 'M3')
+	st = time.time(); sim.einsum(instr, ['M1', 'M2'], 'M3'); sim_time=time.time()-st
+	print('... All close?          ', np.allclose(M3N, sim.get('M3')))
+	print('... numpy time (ms):     {:0.1f}'.format(numpy_time*1000))
+	print('... Sim time   (ms):     {:0.1f}'.format(sim_time*1000))
+for instr in sim.list_common_einsum():
+	test_common(instr)
 
 # terminate the pool
 sim.terminate_pool()

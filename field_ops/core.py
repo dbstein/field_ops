@@ -1,7 +1,6 @@
 import numpy as np
 import scipy as sp
 import numexpr as ne
-import opt_einsum as oe
 import numba
 import multiprocessing as mp
 from .utilities import Bunch, RawArray, mmap_zeros
@@ -161,12 +160,20 @@ class Engine(object):
 
     ############################################################################
     # einsum
-    def einsum(self, instr, evars, out, use_opt=True):
+    def einsum(self, instr, evars, out):
         evars = [self.get(evar) for evar in evars]
-        if use_opt:
-            oe.contract(instr, *evars, out=self.get(out), use_blas=False)
+        out = self.get(out)
+        if instr in self.list_common_einsum():
+            self._common_einsum(evars, out, instr)
         else:
-            np.einsum(instr, *evars, out=self.get(out))
+            np.einsum(instr, *evars, out=out)
+    def list_common_einsum(self):
+        return _common_einsums.keys()
+    def _common_einsum(self, evars, out, instr):
+        M1 = self._reshape_field(evars[0])
+        M2 = self._reshape_field(evars[1])
+        M3 = self._reshape_field(out)
+        _call_common_einsum(M1, M2, M3, instr)
     # this parallel version is slower for now...
     def bad_einsum(self, instr, evars, out):
         n = self.base_shape[-1]
@@ -200,44 +207,10 @@ class Engine(object):
     ############################################################################
     # matrix matrix multiply
     def mat_mat(self, M1, M2, O):
-        M1M = self._reshape_field(self.get(M1))
-        M2M = self._reshape_field(self.get(M2))
-        M3M = self._reshape_field(self.get(O))
-        _mat_mat(M1M, M2M, M3M)
+        self.einsum('ij...,jk...->ik...', [M1, M2], O)
 
     def mat_mat_tA(self, M1, M2, O):
-        M1M = self._reshape_field(self.get(M1))
-        M2M = self._reshape_field(self.get(M2))
-        M3M = self._reshape_field(self.get(O))
-        _mat_mat_tA(M1M, M2M, M3M)
-
-    ############################################################################
-    # simple dot
-    def dot0(self, M1, M2, O):
-        M1M = self._reshape_field(self.get(M1))
-        M2M = self._reshape_field(self.get(M2))
-        M3M = self._reshape_field(self.get(O))
-        _dot0(M1M, M2M, M3M)
-    def dot1(self, M1, M2, O):
-        M1M = self._reshape_field(self.get(M1))
-        M2M = self._reshape_field(self.get(M2))
-        M3M = self._reshape_field(self.get(O))
-        _dot1(M1M, M2M, M3M)
-    def dot2(self, M1, M2, O):
-        M1M = self._reshape_field(self.get(M1))
-        M2M = self._reshape_field(self.get(M2))
-        M3M = self._reshape_field(self.get(O))
-        _dot2(M1M, M2M, M3M)
-    def outer1(self, M1, M2, O):
-        M1M = self._reshape_field(self.get(M1))
-        M2M = self._reshape_field(self.get(M2))
-        M3M = self._reshape_field(self.get(O))
-        _outer1(M1M, M2M, M3M)
-    def outer2(self, M1, M2, O):
-        M1M = self._reshape_field(self.get(M1))
-        M2M = self._reshape_field(self.get(M2))
-        M3M = self._reshape_field(self.get(O))
-        _outer2(M1M, M2M, M3M)
+        self.einsum('ji...,jk...->ik...', [M1, M2], O)
 
     ############################################################################
     # FFT
@@ -345,27 +318,16 @@ def _outer1(M1, M2, M3):
         for j in range(m1):
             for k in range(m2):
                 M3[j,k,i] = M1[j,i]*M2[k,i]
-# @numba.njit(parallel=True)
-# def _outer2(M1, M2, M3):
-#     n = M3.shape[-1]
-#     m1 = M3.shape[0]
-#     m2 = M3.shape[1]
-#     m3 = M3.shape[2]
-#     for i in numba.prange(n):
-#         for j in range(m1):
-#             for k in range(m2):
-#                 for l in range(m3):
-#                     M3[j,k,l,i] = M1[j,i]*M2[k,l,i]
 @numba.njit(parallel=True)
 def _outer2(M1, M2, M3):
     n = M3.shape[-1]
     m1 = M3.shape[0]
     m2 = M3.shape[1]
     m3 = M3.shape[2]
-    for j in numba.prange(m1):
-        for k in numba.prange(m2):
-            for l in numba.prange(m3):
-                for i in prange(n):
+    for i in numba.prange(n):
+        for j in range(m1):
+            for k in range(m2):
+                for l in range(m3):
                     M3[j,k,l,i] = M1[j,i]*M2[k,l,i]
 
 def _realit(x, realit):
@@ -380,5 +342,16 @@ def _ifft(uh, u):
     for i in range(n):
         u[i] = _realit(np.fft.ifftn(uh[i]), realit)
 
-
+_common_einsums = {
+    'ij...,jk...->ik...' : _mat_mat,
+    'ji...,jk...->ik...' : _mat_mat_tA,
+    'i...,i...->...'     : _dot0,
+    'i...,ij...->j...'   : _dot1,
+    'i...,ijk...->jk...' : _dot2,
+    'i...,...->i...'     : _outer0,
+    'i...,j...->ij...'   : _outer1,
+    'i...,jk...->ijk...' : _outer2,
+}
+def _call_common_einsum(M1, M2, O, instr):
+    _common_einsums[instr](M1, M2, O)
 
