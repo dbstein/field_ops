@@ -345,16 +345,27 @@ def _outer1(M1, M2, M3):
         for j in range(m1):
             for k in range(m2):
                 M3[j,k,i] = M1[j,i]*M2[k,i]
+# @numba.njit(parallel=True)
+# def _outer2(M1, M2, M3):
+#     n = M3.shape[-1]
+#     m1 = M3.shape[0]
+#     m2 = M3.shape[1]
+#     m3 = M3.shape[2]
+#     for i in numba.prange(n):
+#         for j in range(m1):
+#             for k in range(m2):
+#                 for l in range(m3):
+#                     M3[j,k,l,i] = M1[j,i]*M2[k,l,i]
 @numba.njit(parallel=True)
 def _outer2(M1, M2, M3):
     n = M3.shape[-1]
     m1 = M3.shape[0]
     m2 = M3.shape[1]
     m3 = M3.shape[2]
-    for i in numba.prange(n):
-        for j in range(m1):
-            for k in range(m2):
-                for l in range(m3):
+    for j in numba.prange(m1):
+        for k in numba.prange(m2):
+            for l in numba.prange(m3):
+                for i in prange(n):
                     M3[j,k,l,i] = M1[j,i]*M2[k,l,i]
 
 def _realit(x, realit):
