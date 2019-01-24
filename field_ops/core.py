@@ -213,11 +213,31 @@ class Engine(object):
 
     ############################################################################
     # simple dot
-    def dot(self, M1, M2, O):
+    def dot0(self, M1, M2, O):
         M1M = self._reshape_field(self.get(M1))
         M2M = self._reshape_field(self.get(M2))
         M3M = self._reshape_field(self.get(O))
-        _dot(M1M, M2M, M3M)
+        _dot0(M1M, M2M, M3M)
+    def dot1(self, M1, M2, O):
+        M1M = self._reshape_field(self.get(M1))
+        M2M = self._reshape_field(self.get(M2))
+        M3M = self._reshape_field(self.get(O))
+        _dot1(M1M, M2M, M3M)
+    def dot2(self, M1, M2, O):
+        M1M = self._reshape_field(self.get(M1))
+        M2M = self._reshape_field(self.get(M2))
+        M3M = self._reshape_field(self.get(O))
+        _dot2(M1M, M2M, M3M)
+    def outer1(self, M1, M2, O):
+        M1M = self._reshape_field(self.get(M1))
+        M2M = self._reshape_field(self.get(M2))
+        M3M = self._reshape_field(self.get(O))
+        _outer1(M1M, M2M, M3M)
+    def outer2(self, M1, M2, O):
+        M1M = self._reshape_field(self.get(M1))
+        M2M = self._reshape_field(self.get(M2))
+        M3M = self._reshape_field(self.get(O))
+        _outer2(M1M, M2M, M3M)
 
     ############################################################################
     # FFT
@@ -273,7 +293,7 @@ def _mat_mat_tA(M1, M2, M3):
         __mat_mat_tA(M1[:,:,i], M2[:,:,i], M3[:,:,i])
 
 @numba.njit(parallel=True)
-def _dot(M1, M2, M3):
+def _dot0(M1, M2, M3):
     n = M1.shape[-1]
     m = M1.shape[0]
     for i in range(n):
@@ -281,6 +301,61 @@ def _dot(M1, M2, M3):
     for i in numba.prange(n):
         for j in range(m):
             M3[i] += M1[j,i]*M2[j,i]
+@numba.njit(parallel=True)
+def _dot1(M1, M2, M3):
+    n = M3.shape[-1]
+    m1 = M2.shape[0]
+    m2 = M2.shape[1]
+    for i in range(n):
+        for j in range(m2):
+            M3[j,i] = 0
+    for i in numba.prange(n):
+        for j in range(m2):
+            for k in range(m1):
+                M3[j,i] += M1[k,i]*M2[k,j,i]
+@numba.njit(parallel=True)
+def _dot2(M1, M2, M3):
+    n = M3.shape[-1]
+    m1 = M2.shape[0]
+    m2 = M2.shape[1]
+    m3 = M2.shape[2]
+    for i in range(n):
+        for j in range(m2):
+            for k in range(m3):
+                M3[j,k,i] = 0
+    for i in numba.prange(n):
+        for j in range(m2):
+            for k in range(m3):
+                for l in range(m1):
+                    M3[j,k,i] += M1[l,i]*M2[l,j,k,i]
+
+@numba.njit(parallel=True)
+def _outer0(M1, M2, M3):
+    n = M3.shape[-1]
+    m1 = M3.shape[0]
+    for i in numba.prange(n):
+        for j in range(m1):
+                M3[j,i] = M1[j,i]*M2[i]
+@numba.njit(parallel=True)
+def _outer1(M1, M2, M3):
+    n = M3.shape[-1]
+    m1 = M3.shape[0]
+    m2 = M3.shape[1]
+    for i in numba.prange(n):
+        for j in range(m1):
+            for k in range(m2):
+                M3[j,k,i] = M1[j,i]*M2[k,i]
+@numba.njit(parallel=True)
+def _outer2(M1, M2, M3):
+    n = M3.shape[-1]
+    m1 = M3.shape[0]
+    m2 = M3.shape[1]
+    m3 = M3.shape[2]
+    for i in numba.prange(n):
+        for j in range(m1):
+            for k in range(m2):
+                for l in range(m3):
+                    M3[j,k,l,i] = M1[j,i]*M2[k,l,i]
 
 def _realit(x, realit):
     return x.real if realit else x
