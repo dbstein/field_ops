@@ -2,7 +2,7 @@ import numpy as np
 import time
 from field_ops import Engine
 
-n = 20
+n = 100
 v = np.linspace(0, 1, n)
 x, y, z = np.meshgrid(v, v, v, indexing='ij')
 
@@ -108,6 +108,30 @@ D_hat = sim.get('D_hat').copy()
 st = time.time(); NR = np.fft.fftpack.ifftn(D_hat, axes=(-3,-2,-1)); numpy_time = time.time()-st
 st = time.time(); sim.ifft('D_hat', 'D'); sim_time = time.time()-st
 print('... All close?          ', np.allclose(NR, sim.get('D')))
+print('... numpy time (ms):     {:0.1f}'.format(numpy_time*1000))
+print('... Sim time   (ms):     {:0.1f}'.format(sim_time*1000))
+
+print('\n--- Testing Symmetrize Operation ---')
+sim.allocate('M', [3,3], float)
+sim.allocate('E', [3,3], float)
+M = sim.get('M')
+M[:] = np.random.rand(*sim.get('M').shape)
+NR = np.empty(sim.get('M').shape)
+st = time.time()
+NR[0,0] = M[0,0]
+NR[1,1] = M[1,1]
+NR[2,2] = M[2,2]
+NR[0,1] = (M[0,1] + M[1,0])/2.0
+NR[0,2] = (M[0,2] + M[2,0])/2.0
+NR[1,2] = (M[1,2] + M[2,1])/2.0
+NR[1,0] = NR[0,1]
+NR[2,0] = NR[0,2]
+NR[2,1] = NR[1,2]
+numpy_time = time.time()-st
+# run once to be sure the FFT is planned
+sim.symmetrize('M', 'E')
+st = time.time(); sim.symmetrize('M', 'E'); sim_time = time.time()-st
+print('... All close?          ', np.allclose(NR, sim.get('E')))
 print('... numpy time (ms):     {:0.1f}'.format(numpy_time*1000))
 print('... Sim time   (ms):     {:0.1f}'.format(sim_time*1000))
 

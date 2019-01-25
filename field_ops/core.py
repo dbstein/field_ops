@@ -214,6 +214,16 @@ class Engine(object):
         self.einsum('ji...,jk...->ik...', [M1, M2], O)
 
     ############################################################################
+    # symmetrize a square rank two tensor
+    def symmetrize(self, M1, O):
+        """
+        computes O = (M1 + M1.T)/2
+        """
+        M1 = self._reshape_field(self.get(M1))
+        M2 = self._reshape_field(self.get(O))
+        _symmetrize(M1, M2)
+
+    ############################################################################
     # FFT
     def fft(self, X, XH):
         X =  self._reshape_tensor(self.get(X))
@@ -330,6 +340,15 @@ def _outer2(M1, M2, M3):
             for k in range(m2):
                 for l in range(m3):
                     M3[j,k,l,i] = M1[j,i]*M2[k,l,i]
+
+@numba.njit(parallel=True)
+def _symmetrize(M1, M2):
+    n = M1.shape[-1]
+    m = M1.shape[0]
+    for i in numba.prange(n):
+        for j in range(m):
+            for k in range(m):
+                M2[j,k,i] = 0.5*(M1[j,k,i] + M1[k,j,i])
 
 def _realit(x, realit):
     return x.real if realit else x
