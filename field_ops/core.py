@@ -225,10 +225,22 @@ class Engine(object):
 
     ############################################################################
     # FFT
-    def fft(self, X, XH):
+    def fft_old(self, X, XH):
         X =  self._reshape_tensor(self.get(X))
         XH = self._reshape_tensor(self.get(XH))
         _fft(X, XH)
+    def fft(self, X, XH):
+        """
+        To deal with intel's issue with slow FFT(real) data?
+        """
+        X = self._reshape_tensor(self.get(X))
+        if X.dtype == float:
+            HELPER = np.empty(X.shape, dtype=complex)
+            ne.evaluate('X', out=HELPER)
+        else:
+            HELPER = X
+        XH = self._reshape_tensor(self.get(XH))
+        _fft(HELPER, XH)
     def ifft(self, XH, X):
         X =  self._reshape_tensor(self.get(X))
         XH = self._reshape_tensor(self.get(XH))

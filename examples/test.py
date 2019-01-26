@@ -2,7 +2,7 @@ import numpy as np
 import time
 from field_ops import Engine
 
-n = 100
+n = 50
 v = np.linspace(0, 1, n)
 x, y, z = np.meshgrid(v, v, v, indexing='ij')
 
@@ -100,6 +100,18 @@ st = time.time(); sim.fft('D', 'D_hat'); sim_time = time.time()-st
 print('... All close?          ', np.allclose(NR, sim.get('D_hat')))
 print('... numpy time (ms):     {:0.1f}'.format(numpy_time*1000))
 print('... Sim time   (ms):     {:0.1f}'.format(sim_time*1000))
+
+# test FFTs
+print('\n--- Testing FFT (old vs new) ---')
+# THIS IS A HACK!
+# BECAUSE ON SOME SYSTEMS INTEL MKL FFT IS VERY SLOW FOR C->C TRANSFORMS
+# WHEN THE INPUT DATA IS FLOAT!
+st = time.time(); sim.fft_old('D', 'D_hat'); old_time = time.time()-st
+D_hat = sim.get('D_hat').copy()
+st = time.time(); sim.fft('D', 'D_hat'); new_time = time.time()-st
+print('... All close?          ', np.allclose(D_hat, sim.get('D_hat')))
+print('... Old time (ms):       {:0.1f}'.format(old_time*1000))
+print('... New time (ms):       {:0.1f}'.format(new_time*1000))
 
 print('\n--- Testing IFFT (as compared to FFTPACK) ---')
 # run once to be sure the FFT is planned
