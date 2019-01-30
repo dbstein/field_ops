@@ -2,7 +2,7 @@ import numpy as np
 import time
 from field_ops import Engine
 
-n = 200
+n = 100
 v = np.linspace(0, 1, n)
 x, y, z = np.meshgrid(v, v, v, indexing='ij')
 
@@ -49,6 +49,7 @@ sim.evaluate('0.1*R + eye', 'R')
 print('\n--- Testing eigendecomposition ---')
 R = sim.get('R')
 S = np.transpose(R, [2,3,4,0,1])
+sim.reset_pool()
 st = time.time(); truth = np.linalg.eigh(S); numpy_time = time.time()-st
 st = time.time(); sim.eigh('R', 'v', 'V'); sim_time = time.time()-st
 tv = np.transpose(truth[0], [3,0,1,2])
@@ -71,13 +72,15 @@ M2[:] = R[:2,:2]
 S = np.transpose(M2, [2,3,4,0,1])
 # try to eigh this
 st = time.time(); truth = np.linalg.eigh(S); numpy_time = time.time()-st
-st = time.time(); sim.eigh('M2', 'v2', 'V2'); sim_time = time.time()-st
+st = time.time(); sim.eigh('M2', 'v2', 'V2'); sim_time1 = time.time()-st
+st = time.time(); sim.eigh('M2', 'v2', 'V2'); sim_time2 = time.time()-st
 tv = np.transpose(truth[0], [3,0,1,2])
 tV = np.transpose(truth[1], [3,4,0,1,2])
 print('... All close, values?  ', np.allclose(tv, sim.get('v2')))
 print('... All close, vectors? ', np.allclose(tV, sim.get('V2')))
-print('... Eigh time (ms):      {:0.1f}'.format(numpy_time*1000))
-print('... Sim time  (ms):      {:0.1f}'.format(sim_time*1000))
+print('... Eigh time  (ms):     {:0.1f}'.format(numpy_time*1000))
+print('... Sim time 1 (ms):     {:0.1f}'.format(sim_time1*1000))
+print('... Sim time 2 (ms):     {:0.1f}'.format(sim_time2*1000))
 
 # test matrix matrix multiply, with transpose on first mat
 print('\n--- Testing matrix matrix multiply, transpose on first mat ---')
