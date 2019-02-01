@@ -7,6 +7,7 @@ from .utilities import Bunch, RawArray, mmap_zeros
 import mkl
 
 max_processes = mkl.get_max_threads()
+ne.set_num_threads(max_processes)
 
 class Engine(object):
     def __init__(self, base_shape):
