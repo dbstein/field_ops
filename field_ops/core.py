@@ -15,24 +15,21 @@ class Engine(object):
         self.base_length = len(self.base_shape)
         self.variables = Bunch({})
         self.mp_variables = Bunch({})
+        self.known_evaluations = Bunch({})
         self._add_base_constants()
         self.pool_formed = False
 
     ############################################################################
     # methods for dealing with variable allocation
     def __allocate(self, name, shape, dtype=float):
-        # self.variables[name] = RawArray(shape=shape, dtype=dtype)()
         self.variables[name] = mmap_zeros(shape=shape, dtype=dtype)
     def _allocate(self, name, field_shape, dtype):
         shape = list(field_shape) + self.base_shape
         if dtype == float or dtype == complex:
             self.__allocate(name, shape, dtype)
-            self.point_at_all_subfields(name)
         elif dtype == 'both':
             self.__allocate(name, shape, float)
-            self.point_at_all_subfields(name)
             self.__allocate(name + '_hat', shape, complex)
-            self.point_at_all_subfields(name + '_hat')
         else:
             raise Exception('dtype not supported')
     def allocate(self, name, field_shape, dtype=float):
@@ -45,7 +42,8 @@ class Engine(object):
         """
         self._allocate(name, field_shape, dtype)
     def allocate_from(self, name, arr):
-        self.allocate(name, arr.shape[:-self.base_length], arr.dtype)
+        shape = 1 if len(arr.shape) == 0 else arr.shape
+        self.__allocate(name, shape, arr.dtype)
         self.get(name)[:] = arr
     def allocate_many(self, var_list):
         for sublist in var_list:
@@ -62,7 +60,7 @@ class Engine(object):
         """
         self.variables[name] = value
         if point_subfields:
-            self.point_at_all_subfields(name)
+            pass
     def add_many(self, add_list):
         for sublist in add_list:
             self.add(*sublist)
@@ -81,54 +79,63 @@ class Engine(object):
         for i in range(l):
             F = F[field_inds[i]]
         self.add(name, F)
+    def _point_at_view(self, name, view):
+        self.add(name, view)
     def point_at_many(self, point_list):
         for sublist in point_list:
             self.point_at(*sublist)
-    def point_at_all_subfields(self, field):
-        F = self.get(field)
-        field_sh, base_sh = self._extract_shapes(F)
-        field_lsh = len(field_sh)
-        if field_lsh > 0:
-            sh_list = [np.arange(x) for x in field_sh]
-            n = np.prod(field_sh)
-            # generate all codes
-            codes = []
-            for i in range(field_lsh):
-                code = np.empty(n, dtype=object)
-                excess = np.prod(field_sh[i+1:])
-                code = np.repeat(np.arange(field_sh[i]), excess)
-                precess = np.prod(field_sh[:i])
-                code = np.tile(code, precess)
-                codes.append(code)
-            code_reorder = []
-            for i in range(n):
-                code = []
-                for j in range(field_lsh):
-                    code.append(codes[j][i])
-                code_reorder.append(code)
-            codes = code_reorder
-            # point everything where it should go
-            for i in range(n):
-                name = field + '_'
-                field_inds = []
-                for j in range(field_lsh):
-                    code = codes[i][j]
-                    name += str(code)
-                    field_inds.append(code)
-                self.point_at(name, field, field_inds)
+    # def point_at_all_subfields(self, field):
+    #     F = self.get(field)
+    #     field_sh, base_sh = self._extract_shapes(F)
+    #     field_lsh = len(field_sh)
+    #     if field_lsh > 0:
+    #         sh_list = [np.arange(x) for x in field_sh]
+    #         n = np.prod(field_sh)
+    #         # generate all codes
+    #         codes = []
+    #         for i in range(field_lsh):
+    #             code = np.empty(n, dtype=object)
+    #             excess = np.prod(field_sh[i+1:])
+    #             code = np.repeat(np.arange(field_sh[i]), excess)
+    #             precess = np.prod(field_sh[:i])
+    #             code = np.tile(code, precess)
+    #             codes.append(code)
+    #         code_reorder = []
+    #         for i in range(n):
+    #             code = []
+    #             for j in range(field_lsh):
+    #                 code.append(codes[j][i])
+    #             code_reorder.append(code)
+    #         codes = code_reorder
+    #         # point everything where it should go
+    #         for i in range(n):
+    #             name = field + '_'
+    #             field_inds = []
+    #             for j in range(field_lsh):
+    #                 code = codes[i][j]
+    #                 name += str(code)
+    #                 field_inds.append(code)
+    #             self.point_at(name, field, field_inds)
 
     ############################################################################
     # methods for extracting variables
-    def _fix_names(self, name):
-        name = name.replace('[','_')
-        name = name.replace(',','')
-        name = name.replace(']','')
-        return name
+    def _check_slice(self, string):
+        """
+        given string, e.g. 'A[0,1]', checks to see if a view to the slice exists
+        if it does, simply return that view
+        otherwise, create the view, add to variables dict, and return
+        """
+        slice_name = _get_slice_name(string)
+        if slice_name not in self.variables:
+            out = _parse_variable(string)
+            if len(out) > 1:
+                varname, slice_str = out
+                new_view = _get_slice(self.variables[varname], slice_str)
+                self._point_at_view(slice_name, new_view)
+        return slice_name
     def get(self, name):
-        """
-        Return the underlying numpy array for variable of name
-        """
-        return self.variables[self._fix_names(name)]
+        name = self._check_slice(name)
+        return self.variables[name]
     def list(self):
         return self.variables.keys()
 
@@ -157,11 +164,14 @@ class Engine(object):
         if self._check_if_pool_reset_needed(var_names):
             self.reset_pool()
     def _check_if_pool_reset_needed(self, var_names):
-        return not all([var in self.mp_variables.keys() for var in var_names])
+        return not all([var in self.mp_variables for var in var_names])
 
     ############################################################################
     # method for easing interface to numexpr
-    def evaluate(self, instr, outname=None):
+    def evaluate_many(self, instrs, replacements=None):
+        for instr in instrs:
+            self.evaluate(instr, replacements)
+    def evaluate(self, instr, replacements=None, outname=None):
         """
         Evaluates 'instr' on self.variables using ne.evaluate,
         If outname is specified, this expects a string with no '=' sign
@@ -172,18 +182,44 @@ class Engine(object):
             self.evaluate('c = a + b')
             in this case outname is generated by taking whatever precedes
             the '=', stripped of whitespace
+        This function also creates
         In either case, if the output variable doesn't yet exist,
             the function will create it
+        Replacements should be a tuple of tuples giving text replacements to make
+        i.e.:
+        self.evaluate('c = a + b', (('a', 'd'), ('c', 'e')) ) is equivalent to:
+            e = d + b
         """
-        if outname is None:
-            outname, instr = [st.strip() for st in instr.split('=')]
-        outname = self._fix_names(outname)
-        instr = self._fix_names(instr)
-        if outname in self.variables.keys():
-            ne.evaluate(instr, local_dict=self.variables, out=self.get(outname))
+        # first check to see if this is in the known evaluations dict
+        if (instr, replacements) in self.known_evaluations:
+            instr, out = self.known_evaluations[instr, replacements]
+            ne.evaluate(instr, local_dict=self.variables, out=out)
+        # if not, construct the evaluation, run it, and store it
         else:
-            out = ne.evaluate(instr, local_dict=self.variables)
-            self.allocate_from(outname, out)
+            if outname is None:
+                outname, instr = [st.strip() for st in instr.split('=')]
+            outname = _replace_in_string(outname, replacements)
+            instr = _replace_in_string(instr, replacements)
+            outname = self._check_slice(outname)
+            instr = self._check_instruction(instr)
+            if outname in self.variables:
+                ne.evaluate(instr, local_dict=self.variables, out=self.get(outname))
+            else:
+                out = ne.evaluate(instr, local_dict=self.variables)
+                self.allocate_from(outname, out)
+            self.known_evaluations[instr, replacements] = (instr, self.get(outname))
+    def _check_instruction(self, string):
+        """
+        given instruction string, 'A[0,1] + B[0]'
+        finds all sliced variables, and for each sliced variable,
+        runs _check_slice
+        and returns a new instruction string with the sliced names
+        """        
+        sliced_variables = _parse_instruction(string)
+        new_names = [self._check_slice(var) for var in sliced_variables]
+        for old_name, new_name in zip(sliced_variables, new_names):
+            string = string.replace(old_name, new_name)
+        return string
 
     ############################################################################
     # einsum
@@ -201,7 +237,8 @@ class Engine(object):
         M2 = self._reshape_field(evars[1])
         M3 = self._reshape_field(out)
         _call_common_einsum(M1, M2, M3, instr)
-    # this parallel version is slower for now...
+    # this parallel version is slower for now..., work on this?
+    # a good version of this would get rid of the need for the common_einsums
     def bad_einsum(self, instr, evars, out):
         n = self.base_shape[-1]
         self._check_and_reset_pool(evars + [out])
@@ -414,4 +451,55 @@ _common_einsums = {
 }
 def _call_common_einsum(M1, M2, O, instr):
     _common_einsums[instr](M1, M2, O)
+
+### functions dealing with parsing equations/slices/variable names
+def _replace_in_string(s, rs):
+    if rs is not None:
+        for r in rs:
+            s = s.replace(r[0], r[1])
+    return s
+def _split_non_alnum(s):
+   pos = len(s)-1
+   while pos >= 0 and (s[pos].isalnum() or s[pos]=='_'):
+      pos-=1
+   return s[pos+1:]
+def _parse_instruction(s):
+    parts = s.split('[')
+    return [_split_non_alnum(parts[i]) + '[' + parts[i+1].split(']')[0] + ']' \
+                                 for i in range(len(parts)-1)]
+def _get_slice(x, s):
+    return x[_slice_from_string(s)]
+def _parse_variable(s):
+    parts = s.split('[')
+    return (parts[0], '[' + parts[1]) if len(parts) > 1 else (s,)
+def _slice_from_string(s):
+    return _parse_complicated_slice(s) if _slice_from_string_is_complicated(s) \
+            else _parse_multi_slice(s)
+def _slice_from_string_is_complicated(s):
+    return '(' in s
+def _parse_complicated_slice(s):
+    parts = s[1:-1].split(',')
+    axes = [int(part.split('(')[0]) for part in parts]
+    slices = [_parse_slice(part.split('(')[1][:-1]) for part in parts]
+    slice_object = [slice(None),]*(np.max(axes)+1)
+    for i in range(len(parts)):
+        slice_object[axes[i]] = slices[i]
+    return tuple(slice_object)
+def _parse_multi_slice(s):
+    return tuple([_parse_slice(s) for s in s[1:-1].split(',')])
+def _parse_slice(s):
+    parts = s.split(':')
+    if len(parts) == 1:
+        return int(parts[0])
+    else:
+        return slice(*[int(p) if p else None for p in parts])
+def _get_slice_name(s):
+    s = s.replace('(', 'YYY')
+    s = s.replace(')', 'YYY')
+    s = s.replace('[', '___')
+    s = s.replace(']', '___')
+    s = s.replace(',', '__')
+    s = s.replace(':', 'ZZZ')
+    s = s.replace('-', 'XXX')
+    return s
 
