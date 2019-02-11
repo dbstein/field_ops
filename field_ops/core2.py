@@ -195,6 +195,10 @@ class Engine(object):
         F = self.empty(tensor_shape, field_shape, dtype=dtype, name=name)
         F[:] = 0.0
         return F
+    def empty_like(self, field, name=None):
+        return self.empty(field.tensor_shape, field.field_shape, field.dtype, name)
+    def zeros_like(self, field, name=None):
+        return self.zeros(field.tensor_shape, field.field_shape, field.dtype, name)
     def many_zeros(self, n, tensor_shape, field_shape, dtype=float, name=None):
         return [self.zeros(tensor_shape, field_shape, dtype, name) for i in range(n)]
     def field_from(self, arr, field_len):
@@ -318,6 +322,8 @@ class Engine(object):
     # matrix matrix multiply
     def mat_mat(self, M1, M2, O):
         self.einsum('ij...,jk...->ik...', [M1, M2], O)
+    def mat_vec(self, M1, M2, O):
+        self.einsum('ij...,j...->i...', [M1, M2], O)
 
     def mat_mat_tA(self, M1, M2, O):
         self.einsum('ji...,jk...->ik...', [M1, M2], O)
@@ -384,6 +390,20 @@ def _mat_mat(M1, M2, M3):
     n = M1.shape[-1]
     for i in numba.prange(n):
         __mat_mat(M1[:,:,i], M2[:,:,i], M3[:,:,i])
+
+@numba.njit()
+def __mat_vec(A, B, C):
+    sh1 = A.shape[0]
+    sh2 = A.shape[1]
+    for i in range(sh1):
+        C[i] = 0.0
+        for j in range(sh2):
+            C[i] += A[i,j]*B[j]
+@numba.njit(parallel=True)
+def _mat_vec(M1, M2, M3):
+    n = M1.shape[-1]
+    for i in numba.prange(n):
+        __mat_vec(M1[:,:,i], M2[:,i], M3[:,i])
 
 @numba.njit()
 def __mat_mat_tA(A, B, C):
