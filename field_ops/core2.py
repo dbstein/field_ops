@@ -195,6 +195,8 @@ class Engine(object):
         F = self.empty(tensor_shape, field_shape, dtype=dtype, name=name)
         F[:] = 0.0
         return F
+    def many_zeros(self, n, tensor_shape, field_shape, dtype=float, name=None):
+        return [self.zeros(tensor_shape, field_shape, dtype, name) for i in range(n)]
     def field_from(self, arr, field_len):
         shape = arr.shape
         tensor_shape = shape[:-field_len]

@@ -2,7 +2,7 @@ import numpy as np
 import time
 from field_ops import Engine2 as Engine
 
-n = 20
+n = 100
 v = np.linspace(0, 1, n)
 x, y, z = np.meshgrid(v, v, v, indexing='ij')
 
@@ -43,7 +43,7 @@ print('... Sim time    (ms):    {:0.1f}'.format(sim_time*1000))
 R[:] = 0.1*R + eye
 
 # instantiate processor pool
-pool = sim.initialize_pool(processors=24)
+pool = sim.initialize_pool()
 
 # compute the eigendecomposition of R
 print('\n--- Testing eigendecomposition ---')
