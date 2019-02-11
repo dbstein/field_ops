@@ -149,7 +149,7 @@ class Engine(object):
         return in_globals or in_locals, in_globals, in_locals
     def get(self, name):
         name = self._check_slice(name)
-        _, in_globals, in_locals = _check_existence(name)
+        _, in_globals, in_locals = self._check_existence(name)
         return self.local_dictionary[name] if in_locals else self.variables[name]
     def list(self, global_=True):
         if global_:

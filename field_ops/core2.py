@@ -4,7 +4,7 @@ import numexpr as ne
 import numba
 import multiprocessing as mp
 from .utilities import Bunch, RawArray, mmap_zeros, mmap_empty, MyString
-from .utilities import multi_iter
+from .utilities import multi_iter, riter
 import mkl
 import sys
 
@@ -332,11 +332,9 @@ class Engine(object):
     # methods for dealing with the processor pool
     def _initialize_worker(self):
         mkl.set_num_threads_local(1)
-        # globals().update({'var' : vardict})
     def initialize_pool(self, processors=None):
         if processors is None:
             processes = max_processes
-        # return = mp.Pool(processes=processes, initializer=self._initialize_worker, initargs=(self.mp_variables,))
         return mp.Pool(processes=processes, initializer=self._initialize_worker)
     def terminate_pool(self, pool):
         pool.terminate()
@@ -350,7 +348,9 @@ class Engine(object):
         Mv = Mv.ravel_field_indeces()
         MV = MV.ravel_field_indeces()
         slices = get_slices(n, pool._processes)
-        pool.starmap(_eigh, zip(slices, [M,]*n, [Mv,]*n, [MV,]*n))
+        iterator = riter(slices, [M, Mv, MV])
+        # pool.starmap(_eigh, zip(slices, [M,]*n, [Mv,]*n, [MV,]*n))
+        pool.starmap(_eigh, iterator)
 
 def get_slices(n, n_cpu):
     starts = np.linspace(0, n, n_cpu, endpoint=False)

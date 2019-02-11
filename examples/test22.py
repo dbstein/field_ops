@@ -2,7 +2,7 @@ import numpy as np
 import time
 from field_ops import Engine2 as Engine
 
-n = 20
+n = 100
 v = np.linspace(0, 1, n)
 x, y, z = np.meshgrid(v, v, v, indexing='ij')
 
