@@ -342,6 +342,7 @@ class Engine(object):
     ############################################################################
     # eigh solver
     def eigh(self, M, Mv, MV, pool):
+        from itertools import cycle
         n = int(np.prod(M.field_shape))
         field_len = M.field_len
         M = M.ravel_field_indeces()
@@ -349,6 +350,7 @@ class Engine(object):
         MV = MV.ravel_field_indeces()
         slices = get_slices(n, pool._processes)
         iterator = riter(slices, [M, Mv, MV])
+        # iterator = zip(slices, cycle([M,]), cycle([Mv,]), cycle([MV,]))
         # pool.starmap(_eigh, zip(slices, [M,]*n, [Mv,]*n, [MV,]*n))
         pool.starmap(_eigh, iterator)
 

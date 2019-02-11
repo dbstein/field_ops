@@ -7,7 +7,7 @@ def riter(_iter, recycle_list):
     """
     construct a recycling iterator
     """
-    L = [itertools.cycle(x) for x in recycle_list]
+    L = [itertools.cycle([x,]) for x in recycle_list]
     return zip(_iter, *L)
 
 def multi_iter(shape):
