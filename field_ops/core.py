@@ -18,11 +18,21 @@ class Engine(object):
         self.known_evaluations = Bunch({})
         self._add_base_constants()
         self.pool_formed = False
+        self.dictionary_pool = Bunch({})
+        self.local_dictionary = self.variables
+
+    def set_local_dictionary(self, name=None):
+        if name is None or name == 'default':
+            self.local_dictionary = self.variables
+        else:
+            if name not in self.dictionary_pool:
+                self.dictionary_pool[name] = Bunch({})
+            self.local_dictionary = self.dictionary_pool[name]
 
     ############################################################################
     # methods for dealing with variable allocation
     def __allocate(self, name, shape, dtype=float):
-        self.variables[name] = mmap_zeros(shape=shape, dtype=dtype)
+        self.local_dictionary[name] = mmap_zeros(shape=shape, dtype=dtype)
     def _allocate(self, name, field_shape, dtype):
         shape = list(field_shape) + self.base_shape
         if dtype == float or dtype == complex:
@@ -51,16 +61,14 @@ class Engine(object):
     def allocate_from_many(self, var_list):
         for sublist in var_list:
             self.allocate_from(*sublist)
-    def add(self, name, value, point_subfields=False):
+    def add(self, name, value):
         """
         Add value to the variable dictionary
         Note that this differs from the behavior of allocate!
         What is added is NOT a memmap, and must be used in a read-only manner
         in multiprocessing code!
         """
-        self.variables[name] = value
-        if point_subfields:
-            pass
+        self.local_dictionary[name] = value
     def add_many(self, add_list):
         for sublist in add_list:
             self.add(*sublist)
@@ -126,18 +134,28 @@ class Engine(object):
         otherwise, create the view, add to variables dict, and return
         """
         slice_name = _get_slice_name(string)
-        if slice_name not in self.variables:
+        if not self._check_existence(slice_name)[0]:
             out = _parse_variable(string)
             if len(out) > 1:
                 varname, slice_str = out
-                new_view = _get_slice(self.variables[varname], slice_str)
+                new_view = _get_slice(self.local_dictionary[varname], slice_str)
                 self._point_at_view(slice_name, new_view)
         return slice_name
+    def _locals_is_globals(self):
+        return self.variables is self.local_dictionary
+    def _check_existence(self, name):
+        in_globals = name in self.variables
+        in_locals = in_globals if self._locals_is_globals() else name in self.local_dictionary
+        return in_globals or in_locals, in_globals, in_locals
     def get(self, name):
         name = self._check_slice(name)
-        return self.variables[name]
-    def list(self):
-        return self.variables.keys()
+        _, in_globals, in_locals = _check_existence(name)
+        return self.local_dictionary[name] if in_locals else self.variables[name]
+    def list(self, global_=True):
+        if global_:
+            return self.variables.keys()
+        else:
+            return self.local_dictionary.keys()
 
     ############################################################################
     # methods for dealing with the processor pool
@@ -193,7 +211,7 @@ class Engine(object):
         # first check to see if this is in the known evaluations dict
         if (instr, replacements) in self.known_evaluations:
             instr, out = self.known_evaluations[instr, replacements]
-            ne.evaluate(instr, local_dict=self.variables, out=out)
+            ne.evaluate(instr, local_dict=self.local_dictionary, global_dict=self.variables, out=out)
         # if not, construct the evaluation, run it, and store it
         else:
             if outname is None:
@@ -202,10 +220,10 @@ class Engine(object):
             instr = _replace_in_string(instr, replacements)
             outname = self._check_slice(outname)
             instr = self._check_instruction(instr)
-            if outname in self.variables:
-                ne.evaluate(instr, local_dict=self.variables, out=self.get(outname))
+            if self._check_existence(outname):
+                ne.evaluate(instr, local_dict=self.local_dictionary, global_dict=self.variables, out=self.get(outname))
             else:
-                out = ne.evaluate(instr, local_dict=self.variables)
+                out = ne.evaluate(instr, local_dict=self.local_dictionary, global_dict=self.variables)
                 self.allocate_from(outname, out)
             self.known_evaluations[instr, replacements] = (instr, self.get(outname))
     def _check_instruction(self, string):

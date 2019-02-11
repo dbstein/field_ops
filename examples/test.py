@@ -43,7 +43,7 @@ print('... Einsum time (ms):    {:0.1f}'.format(numpy_time*1000))
 print('... Sim time    (ms):    {:0.1f}'.format(sim_time*1000))
 
 # now make R be nicely conditioned
-sim.evaluate('0.1*R + eye', 'R')
+sim.evaluate('R = 0.1*R + eye')
 
 # compute the eigendecomposition of R
 print('\n--- Testing eigendecomposition ---')
@@ -181,6 +181,10 @@ def test_common(instr):
 	print('... Sim time   (ms):     {:0.1f}'.format(sim_time*1000))
 for instr in sim.list_common_einsum():
 	test_common(instr)
+
+print('\n---Test the use of local dictionaries ---')
+sim.set_local_dictionary('test')
+sim.set_local_dictionary('default')
 
 # terminate the pool
 sim.terminate_pool()
