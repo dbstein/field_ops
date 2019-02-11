@@ -2,7 +2,7 @@ import numpy as np
 import time
 from field_ops import Engine2 as Engine
 
-n = 100
+n = 20
 v = np.linspace(0, 1, n)
 x, y, z = np.meshgrid(v, v, v, indexing='ij')
 
@@ -43,7 +43,7 @@ print('... Sim time    (ms):    {:0.1f}'.format(sim_time*1000))
 R[:] = 0.1*R + eye
 
 # instantiate processor pool
-pool = sim.initialize_pool()
+pool = sim.initialize_pool(processors=24)
 
 # compute the eigendecomposition of R
 print('\n--- Testing eigendecomposition ---')
@@ -72,10 +72,12 @@ print('\n--- Testing FFT (as compared to FFTPACK) ---')
 # run once to be sure the FFT is planned
 _ = np.fft.fftn(D.data)
 st = time.time(); NR = np.fft.fftpack.fftn(D.data, axes=(-3,-2,-1)); numpy_time = time.time()-st
-st = time.time(); sim.fft(D, D_hat); sim_time = time.time()-st
+st = time.time(); sim.fft(D, D_hat); sim_time1 = time.time()-st
+st = time.time(); sim.fft(D, D_hat); sim_time2 = time.time()-st
 print('... All close?          ', np.allclose(NR, D_hat.data))
 print('... numpy time (ms):     {:0.1f}'.format(numpy_time*1000))
-print('... Sim time   (ms):     {:0.1f}'.format(sim_time*1000))
+print('... Sim time 1 (ms):     {:0.1f}'.format(sim_time1*1000))
+print('... Sim time 2 (ms):     {:0.1f}'.format(sim_time2*1000))
 
 print('\n--- Testing IFFT (as compared to FFTPACK) ---')
 # run once to be sure the FFT is planned

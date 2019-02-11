@@ -332,8 +332,8 @@ class Engine(object):
     # methods for dealing with the processor pool
     def _initialize_worker(self):
         mkl.set_num_threads_local(1)
-    def initialize_pool(self, processors=None):
-        if processors is None:
+    def initialize_pool(self, processes=None):
+        if processes is None:
             processes = max_processes
         return mp.Pool(processes=processes, initializer=self._initialize_worker)
     def terminate_pool(self, pool):
