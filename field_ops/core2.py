@@ -4,6 +4,7 @@ import numexpr as ne
 import numba
 import multiprocessing as mp
 from .utilities import Bunch, RawArray, mmap_zeros, mmap_empty, MyString
+from .utilities import multi_iter
 import mkl
 import sys
 
@@ -21,9 +22,6 @@ class Expression(object):
     def __init__(self, obj, refs=None):
         self.string = '(' + str(obj) + ')'
         self.references = [] if refs is None else refs
-    # add any embedded object to references so it doesn't get cleaned
-    def _add_ref(self, r):
-        self.references += r.references
     # arithmetic operations
     def __add__(a, b):
         return binop(a, turn_to_expression(b), ' + ')
@@ -69,10 +67,6 @@ class Expression(object):
         return self.string
     def __repr__(self):
         return "Expression: '" + self.string + "'"
-    # # delete method
-    # def __del__(self):
-    #     for ref in self.references:
-    #         del ref
 
 def get_slice_len(_slice, n):
     return 0 if type(_slice) is int else len(range(*_slice.indices(n)))
@@ -94,8 +88,6 @@ class Field(Expression):
         self.identifier = identifier
         self.engine = engine
         self.deleted = False
-        self.tensor_raveled_data = self.ravel_tensor_indeces()
-        self.field_raveled_data = self.ravel_field_indeces()
         self.references = [self,]
         self.string = identifier
     def _compute_sliced_size(self, _slice):
@@ -112,7 +104,7 @@ class Field(Expression):
         if not isinstance(value, Expression):
             self.data[_slice] = value
         else:
-            self.engine| self[_slice] << turn_to_expression(value)
+            self.engine| self[_slice] << value
     def __getitem__(self, _slice):
         new_var, new_identifier = self.engine._get_slice(self.identifier, _slice)
         new_tensor_shape, new_field_shape = self._compute_sliced_size(_slice)
@@ -136,12 +128,20 @@ class Field(Expression):
             new_tensor_shape = [np.prod(self.tensor_shape),]
         new_field_shape = self.field_shape
         new_shape = tuple(new_tensor_shape + new_field_shape)
-        return self.data.reshape(new_shape)
+        out = self.data.reshape(new_shape)
+        if out.flags.owndata:
+            raise Exception('ravel_tensor_indeces failed to produce a view')
+        else:
+            return self.data.reshape(new_shape)
     def ravel_field_indeces(self):
         new_tensor_shape = self.tensor_shape
         new_field_shape = [np.prod(self.field_shape),]
         new_shape = tuple(new_tensor_shape + new_field_shape)
-        return self.data.reshape(new_shape)
+        out = self.data.reshape(new_shape)
+        if out.flags.owndata:
+            raise Exception('ravel_field_indeces failed to produce a view')
+        else:
+            return self.data.reshape(new_shape)
 
 def get_sane_dtype(dtype):
     if dtype == float:
@@ -286,105 +286,31 @@ class Engine(object):
     def list_common_einsum(self):
         return _common_einsums.keys()
     def _common_einsum(self, evars, out, instr):
-        M1 = evars[0].field_raveled_data
-        M2 = evars[1].field_raveled_data
-        M3 = out.field_raveled_data
+        M1 = evars[0].ravel_field_indeces()
+        M2 = evars[1].ravel_field_indeces()
+        M3 = out.ravel_field_indeces()
         _call_common_einsum(M1, M2, M3, instr)
 
     ############################################################################
     # FFT
-    def fft_old(self, X, XH):
-        _fft(X.tensor_raveled_data, XH.tensor_raveled_data)
     def fft(self, X, XH):
         """
         To deal with intel's issue with slow FFT(real) data?
         """
-        X = X.tensor_raveled_data
         return_to_pool = False
         if X.dtype == float:
             HELPER = self._query_memory_pool(X.shape, complex)
             if HELPER is None:
                 HELPER = np.empty(X.shape, dtype=complex)
-            HELPER[:] = X
+            HELPER[:] = X.data
             return_to_pool = True
         else:
-            HELPER = X
-        _fft(HELPER, XH.tensor_raveled_data)
+            HELPER = X.data
+        _fft(HELPER, XH.data, X.tensor_shape)
         if return_to_pool:
             self.memory_pool += HELPER
     def ifft(self, XH, X):
-        _ifft(XH.tensor_raveled_data, X.tensor_raveled_data)
-
-
-class Engine_old(object):
-    def __init__(self, base_shape):
-        pass
-
-    def allocate_from(self, name, arr):
-        shape = 1 if len(arr.shape) == 0 else arr.shape
-        self.__allocate(name, shape, arr.dtype)
-        self.get(name)[:] = arr
-    def allocate_many(self, var_list):
-        for sublist in var_list:
-            self._allocate(*sublist)
-    def allocate_from_many(self, var_list):
-        for sublist in var_list:
-            self.allocate_from(*sublist)
-    def copy_from_to(self, vf, vt):
-        self.get(vt)[:] = self.get(vf)
-
-    ############################################################################
-    # methods for dealing with the processor pool
-    def _initialize_worker(self, vardict):
-        mkl.set_num_threads_local(1)
-        globals().update({'var' : vardict})
-    def initialize_pool(self, processors=None):
-        if processors is None:
-            self.processes = max_processes
-        self.mp_variables = self.variables.copy()
-        self.pool = mp.Pool(processes=self.processes, initializer=self._initialize_worker, initargs=(self.mp_variables,))
-        self.pool_formed = True
-    def reset_pool(self):
-        if self.pool_formed:
-            self.pool.terminate()
-            self.mp_variables = self.variables.copy()
-            self.pool = mp.Pool(processes=self.processes, initializer=self._initialize_worker, initargs=(self.mp_variables,))
-        else:
-            raise Exception('Initialize pool before resetting...')
-    def terminate_pool(self):
-        if self.pool_formed:
-            self.pool.terminate()
-    def _check_and_reset_pool(self, var_names):
-        if self._check_if_pool_reset_needed(var_names):
-            self.reset_pool()
-    def _check_if_pool_reset_needed(self, var_names):
-        return not all([var in self.mp_variables for var in var_names])
-
-    ############################################################################
-    # reshaping functions
-    def _extract_shapes(self, X):
-        sh = list(X.shape)
-        lsh = len(sh)
-        field_lsh = lsh - self.base_length
-        field_sh = sh[:field_lsh]
-        return field_sh, self.base_shape
-    def _reshape_tensor(self, X):
-        field_sh, base_sh = self._extract_shapes(X)
-        newsh = [int(np.prod(field_sh))] + base_sh
-        return np.reshape(X, newsh)
-    def _reshape_field(self, X):
-        field_sh, base_sh = self._extract_shapes(X)
-        newsh = field_sh + [int(np.prod(base_sh))]
-        return np.reshape(X, newsh)
-
-    ############################################################################
-    # eigh solver
-    def eigh(self, M, Mv, MV):
-        self._check_and_reset_pool([M, Mv, MV])
-        n = self.base_shape[0]
-        t1 = [2 + i for i in range(len(self.base_shape))] + [0,1]
-        t2 = [1 + i for i in range(len(self.base_shape))] + [0,]
-        self.pool.starmap(_eigh, zip(range(n), [M,]*n, [Mv,]*n, [MV,]*n, [t1,]*n, [t2,]*n))
+        _ifft(XH.data, X.data, X.tensor_shape)
 
     ############################################################################
     # matrix matrix multiply
@@ -394,48 +320,50 @@ class Engine_old(object):
     def mat_mat_tA(self, M1, M2, O):
         self.einsum('ji...,jk...->ik...', [M1, M2], O)
 
-    ############################################################################
-    # symmetrize a square rank two tensor
     def symmetrize(self, M1, O):
         """
         computes O = (M1 + M1.T)/2
         """
-        M1 = self._reshape_field(self.get(M1))
-        M2 = self._reshape_field(self.get(O))
+        M1 = M1.ravel_field_indeces()
+        M2 = O.ravel_field_indeces()
         _symmetrize(M1, M2)
 
     ############################################################################
-    # FFT
-    def fft_old(self, X, XH):
-        X =  self._reshape_tensor(self.get(X))
-        XH = self._reshape_tensor(self.get(XH))
-        _fft(X, XH)
-    def fft(self, X, XH):
-        """
-        To deal with intel's issue with slow FFT(real) data?
-        """
-        X = self._reshape_tensor(self.get(X))
-        if X.dtype == float:
-            HELPER = np.empty(X.shape, dtype=complex)
-            ne.evaluate('X', out=HELPER)
-        else:
-            HELPER = X
-        XH = self._reshape_tensor(self.get(XH))
-        _fft(HELPER, XH)
-    def ifft(self, XH, X):
-        X =  self._reshape_tensor(self.get(X))
-        XH = self._reshape_tensor(self.get(XH))
-        _ifft(XH, X)
+    # methods for dealing with the processor pool
+    def _initialize_worker(self):
+        mkl.set_num_threads_local(1)
+        # globals().update({'var' : vardict})
+    def initialize_pool(self, processors=None):
+        if processors is None:
+            processes = max_processes
+        # return = mp.Pool(processes=processes, initializer=self._initialize_worker, initargs=(self.mp_variables,))
+        return mp.Pool(processes=processes, initializer=self._initialize_worker)
+    def terminate_pool(self, pool):
+        pool.terminate()
 
-# internal functions for parallel execution
-def _einsum(n, instr, evars, out):
-    evarsn = [var[evar][..., n] for evar in evars]
-    np.einsum(instr, *evarsn, out=var[out][..., n])
-def _eigh(n, _M, _v, _V, t1, t2):
-    M = np.transpose(var[_M], t1)
-    v = np.transpose(var[_v], t2)
-    V = np.transpose(var[_V], t1)
-    v[n], V[n] = np.linalg.eigh(M[n])
+    ############################################################################
+    # eigh solver
+    def eigh(self, M, Mv, MV, pool):
+        n = int(np.prod(M.field_shape))
+        field_len = M.field_len
+        M = M.ravel_field_indeces()
+        Mv = Mv.ravel_field_indeces()
+        MV = MV.ravel_field_indeces()
+        slices = get_slices(n, pool._processes)
+        pool.starmap(_eigh, zip(slices, [M,]*n, [Mv,]*n, [MV,]*n))
+
+def get_slices(n, n_cpu):
+    starts = np.linspace(0, n, n_cpu, endpoint=False)
+    starts = np.floor(starts).astype(int)
+    starts = np.concatenate([starts, (n,)])
+    return [slice(starts[i], starts[i+1]) for i in range(n_cpu)]
+
+
+def _eigh(_slice, _M, _v, _V):
+    M = np.transpose(_M, [2,0,1])
+    v = np.transpose(_v, [1,0,])
+    V = np.transpose(_V, [2,0,1])
+    v[_slice], V[_slice] = np.linalg.eigh(M[_slice])
 
 @numba.njit()
 def __mat_mat(A, B, C):
@@ -545,14 +473,12 @@ def _symmetrize(M1, M2):
 
 def _realit(x, realit):
     return x.real if realit else x
-def _fft(u, uh):
-    n = u.shape[0]
-    for i in range(n):
+def _fft(u, uh, tensor_shape):
+    for i in multi_iter(tensor_shape):
         uh[i] = np.fft.fftn(u[i])
-def _ifft(uh, u):
+def _ifft(uh, u, tensor_shape):
     realit = u.dtype == float
-    n = u.shape[0]
-    for i in range(n):
+    for i in multi_iter(tensor_shape):
         u[i] = _realit(np.fft.ifftn(uh[i]), realit)
 
 _common_einsums = {

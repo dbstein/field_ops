@@ -1,6 +1,10 @@
 import numpy as np
 import multiprocessing as mp
 import mmap
+import itertools
+
+def multi_iter(shape):
+    return itertools.product(*[range(s) for s in shape])
 
 class MyString(str):
     def __add__(self, x):
@@ -75,6 +79,27 @@ class RawArray(object):
             np.copyto(self.numpy, array)
     def __call__(self):
         return self.numpy
+
+def __unpickle__(ai, dtype):
+    dtype = np.dtype(dtype)
+    tp = np.ctypeslib._typecodes['|u1']
+
+    # if there are strides, use strides, otherwise the stride is the itemsize of dtype
+    if ai['strides']:
+        tp *= ai['strides'][-1]
+    else:
+        tp *= dtype.itemsize
+
+    for i in np.asarray(ai['shape'])[::-1]:
+        tp *= i
+
+    # grab a flat char array at the sharemem address, with length at least contain ai required
+    ra = tp.from_address(ai['data'][0])
+    buffer = np.ctypeslib.as_array(ra).ravel()
+    # view it as what it should look like
+    shm = np.ndarray(buffer=buffer, dtype=dtype, 
+            strides=ai['strides'], shape=ai['shape']).view(type=anonymousmemmap)
+    return shm
 
 class anonymousmemmap(np.memmap):
     """
