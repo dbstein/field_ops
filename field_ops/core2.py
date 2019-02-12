@@ -172,21 +172,28 @@ class Engine(object):
         self.variables['__e__'] = np.e
         self.current_identifier = MyString('a')
         self.memory_pool = MemoryPool()
+        self.verbose_allocation = False
     def __str__(self):
         return repr(self.primary_variables)
 
     ############################################################################
     # methods for dealing with variable allocation
-    def _query_memory_pool(self, shape, dtype):
-        return self.memory_pool(shape, dtype)
+    def set_verbose_allocation(self, value=True):
+        self.verbose_allocation = value
+    def _get_empty(self, shape, dtype):
+        trial = self.memory_pool(shape, dtype)
+        if trial is None:
+            if self.verbose_allocation:
+                print('... Memory Allocated')
+            return mmap_empty(shape=shape, dtype=dtype)
+        else:
+            return trial
     def allocate_many(self, var_list, zeros=True):
         func = self.zeros if zeros else self.empty
         return [func(*sublist) for sublist in var_list]
     def empty(self, tensor_shape, field_shape, dtype=float, name=None):
         shape = tuple(list(tensor_shape) + list(field_shape))
-        data = self._query_memory_pool(shape, dtype)
-        if data is None:
-            data = mmap_empty(shape=shape, dtype=dtype)
+        data = self._get_empty(shape, dtype)
         identifier = self._get_identifier(name)
         self.variables[identifier] = data
         self.primary_variables[identifier] = None
@@ -299,24 +306,27 @@ class Engine(object):
 
     ############################################################################
     # FFT
-    def fft(self, X, XH):
+    def fft(self, X, XH=None):
         """
         To deal with intel's issue with slow FFT(real) data?
         """
-        return_to_pool = False
         if X.dtype == float:
-            HELPER = self._query_memory_pool(X.shape, complex)
-            if HELPER is None:
-                HELPER = np.empty(X.shape, dtype=complex)
-            HELPER[:] = X.data
-            return_to_pool = True
+            XE = self._get_empty(X.shape, complex)
+            return_XE_to_pool = True
         else:
-            HELPER = X.data
-        _fft(HELPER, XH.data, X.tensor_shape)
-        if return_to_pool:
-            self.memory_pool += HELPER
-    def ifft(self, XH, X):
+            XE = X.data
+            return_XE_to_pool = False
+        if XH is None:
+            XH = self.empty(X.tensor_shape, X.field_shape, complex)
+        _fft(XE, XH.data, X.tensor_shape)
+        if return_XE_to_pool:
+            self.memory_pool += XE
+        return XH
+    def ifft(self, XH, X=None, real_output=True):
+        X = self.empty(XH.tensor_shape, XH.field_shape, \
+                                 float if real_output else complex)
         _ifft(XH.data, X.data, X.tensor_shape)
+        return X
 
     ############################################################################
     # matrix matrix multiply
