@@ -126,7 +126,7 @@ class Field(Expression):
             new_tensor_shape = []
         else:
             new_tensor_shape = [np.prod(self.tensor_shape),]
-        new_field_shape = self.field_shape
+        new_field_shape = list(self.field_shape)
         new_shape = tuple(new_tensor_shape + new_field_shape)
         out = self.data.reshape(new_shape)
         if out.flags.owndata:
@@ -134,7 +134,7 @@ class Field(Expression):
         else:
             return self.data.reshape(new_shape)
     def ravel_field_indeces(self):
-        new_tensor_shape = self.tensor_shape
+        new_tensor_shape = list(self.tensor_shape)
         new_field_shape = [np.prod(self.field_shape),]
         new_shape = tuple(new_tensor_shape + new_field_shape)
         out = self.data.reshape(new_shape)
