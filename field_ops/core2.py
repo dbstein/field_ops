@@ -211,7 +211,7 @@ class Engine(object):
     def field_from(self, arr, field_len):
         shape = arr.shape
         tensor_shape = shape[:-field_len]
-        field_shape = shape[field_len:]
+        field_shape = shape[-field_len:]
         field = self.empty(tensor_shape, field_shape, arr.dtype)
         field[:] = arr
         return field
