@@ -76,7 +76,7 @@ def get_full_slice(_slice, n):
     return tuple(list(_slice) + [slice(None),]*(n-len(_slice)))
 
 class Field(Expression):
-    def __init__(self, tensor_shape, field_shape, dtype, data, identifier, engine):
+    def __init__(self, tensor_shape, field_shape, dtype, data, identifier, engine, parent=None):
         self.tensor_shape = tensor_shape
         self.field_shape = field_shape
         self.shape = tuple(list(self.tensor_shape) + list(self.field_shape))
@@ -90,13 +90,17 @@ class Field(Expression):
         self.deleted = False
         self.references = [self,]
         self.string = identifier
+        # the purpose of keeping track of parent is so that
+        # del doesn't get called on a parent while a slice
+        # still exists!
+        self.parent = parent
     def _compute_sliced_size(self, _slice):
         pass
     def __repr__(self):
         return self.data.__repr__()
     def __del__(self):
         if not self.deleted:
-            self.engine._delete(self.identifier)
+            self.engine._delete_field(self)
         self.deleted = True
     def __call__(self):
         return self.data
@@ -108,7 +112,7 @@ class Field(Expression):
     def __getitem__(self, _slice):
         new_var, new_identifier = self.engine._get_slice(self.identifier, _slice)
         new_tensor_shape, new_field_shape = self._compute_sliced_size(_slice)
-        return Field(new_tensor_shape, new_field_shape, self.dtype, new_var, new_identifier, self.engine)
+        return Field(new_tensor_shape, new_field_shape, self.dtype, new_var, new_identifier, self.engine, self)
     def _compute_sliced_size(self, _slice):
         # extract tensor portion of slice and field portion of slice
         full_slice = get_full_slice(_slice, self.shape_len)
@@ -167,14 +171,15 @@ class MemoryPool(object):
 class Engine(object):
     def __init__(self):
         self.variables = Bunch({})
-        self.primary_variables = Bunch({})
         self.variables['__pi__'] = np.pi
         self.variables['__e__'] = np.e
         self.current_identifier = MyString('a')
         self.memory_pool = MemoryPool()
         self.verbose_allocation = False
     def __str__(self):
-        return repr(self.primary_variables)
+        return repr(self.variables)
+    def __repr__(self):
+        return str(self)
 
     ############################################################################
     # methods for dealing with variable allocation
@@ -196,7 +201,6 @@ class Engine(object):
         data = self._get_empty(shape, dtype)
         identifier = self._get_identifier(name)
         self.variables[identifier] = data
-        self.primary_variables[identifier] = None
         return Field(tensor_shape, field_shape, dtype, data, identifier, self)
     def zeros(self, tensor_shape, field_shape, dtype=float, name=None):
         F = self.empty(tensor_shape, field_shape, dtype=dtype, name=name)
@@ -227,16 +231,13 @@ class Engine(object):
             ret = '___' + self.current_identifier
             self.current_identifier += 1
         return ret
-    def _delete(self, identifier):
-        if identifier in self.primary_variables:
-            del self.primary_variables[identifier]
-            self.memory_pool += self.variables[identifier]
-        del self.variables[identifier]
-    def list(self, full=False):
-        if full:
-            print(self.variables)
-        else:
-            print(self.primary_variables)
+    def _delete_field(self, field):
+        var = self.variables[field.identifier]
+        if field.parent is None:
+            self.memory_pool += var
+        del self.variables[field.identifier]
+    def list(self):
+        print(self.variables)
 
     ############################################################################
     # methods for dealing with variables added, but not allocated to the class
@@ -312,6 +313,7 @@ class Engine(object):
         """
         if X.dtype == float:
             XE = self._get_empty(X.shape, complex)
+            XE[:] = X.data
             return_XE_to_pool = True
         else:
             XE = X.data
@@ -323,7 +325,8 @@ class Engine(object):
             self.memory_pool += XE
         return XH
     def ifft(self, XH, X=None, real_output=True):
-        X = self.empty(XH.tensor_shape, XH.field_shape, \
+        if X is None:
+            X = self.empty(XH.tensor_shape, XH.field_shape, \
                                  float if real_output else complex)
         _ifft(XH.data, X.data, X.tensor_shape)
         return X
